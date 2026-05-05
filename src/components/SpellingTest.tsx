@@ -18,6 +18,9 @@ import {
   resetProgress
 } from '../utils/progressManager'
 
+/** Merriam-Webster Dictionary API key (personal app; exposed in client bundle) */
+const MERRIAM_WEBSTER_API_KEY = '2a1b51e3-7493-4ec5-b9a5-5649e9dc6f23'
+
 interface SpellingTestProps {
   words: string[]
 }
@@ -83,26 +86,34 @@ export default function SpellingTest({ words }: SpellingTestProps) {
     inputRef.current?.focus()
   }, [])
 
-  // Fetch definition when word changes
+  // Fetch definition when word changes (Merriam-Webster Elementary Dictionary, sd2)
   useEffect(() => {
     const fetchDefinition = async () => {
       if (!currentWord) return
-      
+
       setLoadingDefinition(true)
       try {
-        const response = await fetch(
-          `https://api.dictionaryapi.dev/api/v2/entries/en/${currentWord}`
-        )
-        if (response.ok) {
-          const data = await response.json()
-          if (data[0]?.meanings[0]?.definitions[0]?.definition) {
-            setDefinition(data[0].meanings[0].definitions[0].definition)
-          } else {
-            setDefinition('Definition not available')
-          }
-        } else {
+        const url = `https://www.dictionaryapi.com/api/v3/references/sd2/json/${encodeURIComponent(currentWord)}?key=${encodeURIComponent(MERRIAM_WEBSTER_API_KEY)}`
+        const response = await fetch(url)
+        if (!response.ok) {
           setDefinition('Definition not available')
+          return
         }
+
+        const data: unknown = await response.json()
+        if (!Array.isArray(data) || data.length === 0) {
+          setDefinition('Definition not available')
+          return
+        }
+
+        const first = data[0]
+        if (typeof first === 'string') {
+          setDefinition('Definition not available')
+          return
+        }
+
+        const shortdef = (first as { shortdef?: string[] }).shortdef?.filter(Boolean) ?? []
+        setDefinition(shortdef[0] ?? 'Definition not available')
       } catch (error) {
         console.error('Error fetching definition:', error)
         setDefinition('Definition not available')

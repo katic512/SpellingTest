@@ -100,66 +100,92 @@ export const getWordStats = (
   }
 }
 
+/** Practice priority: wrong words ahead of new, new ahead of perfect-only history */
+const practiceTier = (p: WordPerformance): number => {
+  const total = p.successes + p.misses
+  if (total === 0) return 1
+  if (p.misses > 0) return 0
+  return 2
+}
+
 /**
  * Sort words by performance rules:
- * 1. New words first (never attempted)
- * 2. Frequently misspelled words
- * 3. Words with mixed results
- * 4. Consistently spelled words
+ * 1. Words with any misses (revisit wrong spellings often)
+ * 2. New words (never attempted)
+ * 3. Words spelled correctly every time so far (lowest priority)
+ *
+ * Within tier 0: lower accuracy first, then more misses, then more total attempts.
+ * Within tier 2: fewer successful checks first (lightly practiced before “over-drilled”).
  */
 export const sortWordsByPerformance = (
   words: string[],
   performance: WordPerformance[]
 ): string[] => {
-  // Create a map for quick lookup
   const perfMap = new Map(performance.map(p => [p.word, p]))
-  
+
   return [...words].sort((a, b) => {
     const perfA = perfMap.get(a.toLowerCase())
     const perfB = perfMap.get(b.toLowerCase())
-    
+
     if (!perfA || !perfB) return 0
-    
-    // Priority 1: New words first (never attempted)
+
+    const tierA = practiceTier(perfA)
+    const tierB = practiceTier(perfB)
+    if (tierA !== tierB) return tierA - tierB
+
     const totalA = perfA.successes + perfA.misses
     const totalB = perfB.successes + perfB.misses
-    
-    if (totalA === 0 && totalB !== 0) return -1
-    if (totalB === 0 && totalA !== 0) return 1
-    if (totalA === 0 && totalB === 0) return 0
-    
-    // Priority 2: Calculate accuracy
-    const accuracyA = perfA.successes / totalA
-    const accuracyB = perfB.successes / totalB
-    
-    // Lower accuracy = higher priority (more practice needed)
-    if (accuracyA !== accuracyB) {
-      return accuracyA - accuracyB
+
+    if (tierA === 0) {
+      const accuracyA = perfA.successes / totalA
+      const accuracyB = perfB.successes / totalB
+      if (accuracyA !== accuracyB) return accuracyA - accuracyB
+      if (perfA.misses !== perfB.misses) return perfB.misses - perfA.misses
+      if (totalA !== totalB) return totalB - totalA
     }
-    
-    // Priority 3: If same accuracy, prioritize by most attempts (most practiced)
-    return totalB - totalA
+
+    if (tierA === 2 && perfA.successes !== perfB.successes) {
+      return perfA.successes - perfB.successes
+    }
+
+    return a.localeCompare(b)
   })
 }
 
 /**
- * Shuffle words within categories while maintaining priority
+ * Shuffle while preserving global priority: only reorder within the same practice tier,
+ * then within small batches inside each tier so wrong words stay ahead of perfect ones.
  */
 export const shuffleWithinCategories = (
   words: string[],
   performance: WordPerformance[],
-  categorySize: number = 5
+  tierBatchSize: number = 4
 ): string[] => {
   const sorted = sortWordsByPerformance(words, performance)
-  const result: string[] = []
-  
-  // Process in chunks and shuffle within each chunk
-  for (let i = 0; i < sorted.length; i += categorySize) {
-    const chunk = sorted.slice(i, i + categorySize)
-    const shuffled = [...chunk].sort(() => Math.random() - 0.5)
-    result.push(...shuffled)
+  const perfMap = new Map(performance.map(p => [p.word, p]))
+
+  const tierOf = (w: string): number => {
+    const p = perfMap.get(w.toLowerCase())
+    return p ? practiceTier(p) : 1
   }
-  
+
+  const result: string[] = []
+  let i = 0
+
+  while (i < sorted.length) {
+    const t = tierOf(sorted[i])
+    let j = i + 1
+    while (j < sorted.length && tierOf(sorted[j]) === t) j++
+
+    const tierRun = sorted.slice(i, j)
+    for (let k = 0; k < tierRun.length; k += tierBatchSize) {
+      const chunk = tierRun.slice(k, k + tierBatchSize)
+      const shuffled = [...chunk].sort(() => Math.random() - 0.5)
+      result.push(...shuffled)
+    }
+    i = j
+  }
+
   return result
 }
 
