@@ -8,6 +8,7 @@ export interface WordPerformance {
   successes: number
   misses: number
   lastAttempt?: string
+  masteredAtAttempt?: number
 }
 
 export interface ProgressData {
@@ -18,6 +19,8 @@ export interface ProgressData {
 }
 
 const STORAGE_KEY = 'spelling-test-progress'
+const MASTERED_SUCCESS_THRESHOLD = 3
+const MASTERED_REVIEW_INTERVAL = 25
 
 /**
  * Initialize performance data for new words
@@ -68,15 +71,29 @@ export const saveProgress = (data: ProgressData): void => {
 export const updatePerformance = (
   performance: WordPerformance[],
   word: string,
-  isCorrect: boolean
+  isCorrect: boolean,
+  totalAttemptsAfterCheck: number
 ): WordPerformance[] => {
   return performance.map(p => {
     if (p.word === word.toLowerCase()) {
+      const nextSuccesses = isCorrect ? p.successes + 1 : p.successes
+      const nextMisses = !isCorrect ? p.misses + 1 : p.misses
+      const becameMastered =
+        isCorrect &&
+        nextSuccesses >= MASTERED_SUCCESS_THRESHOLD &&
+        nextMisses === 0 &&
+        p.masteredAtAttempt === undefined
+
       return {
         ...p,
-        successes: isCorrect ? p.successes + 1 : p.successes,
-        misses: !isCorrect ? p.misses + 1 : p.misses,
-        lastAttempt: new Date().toISOString()
+        successes: nextSuccesses,
+        misses: nextMisses,
+        lastAttempt: new Date().toISOString(),
+        masteredAtAttempt: becameMastered
+          ? totalAttemptsAfterCheck
+          : !isCorrect
+            ? undefined
+            : p.masteredAtAttempt
       }
     }
     return p
@@ -98,6 +115,32 @@ export const getWordStats = (
     misses: perf.misses,
     total: perf.successes + perf.misses
   }
+}
+
+/** A word is considered mastered once it is correct 3+ times with no misses. */
+export const isMasteredWord = (p: WordPerformance): boolean => {
+  return p.successes >= MASTERED_SUCCESS_THRESHOLD && p.misses === 0
+}
+
+/**
+ * Active practice pool excludes mastered words when there are still other words to practice.
+ * If everything is mastered, fall back to full list so practice can continue.
+ */
+export const getPracticeWordPool = (
+  words: string[],
+  performance: WordPerformance[],
+  totalAttempts: number
+): string[] => {
+  const perfMap = new Map(performance.map(p => [p.word, p]))
+  const active = words.filter(word => {
+    const p = perfMap.get(word.toLowerCase())
+    if (!p) return true
+    if (!isMasteredWord(p)) return true
+    if (p.masteredAtAttempt === undefined) return false
+    return totalAttempts >= p.masteredAtAttempt + MASTERED_REVIEW_INTERVAL
+  })
+
+  return active.length > 0 ? active : words
 }
 
 /** Practice priority: wrong words ahead of new, new ahead of perfect-only history */

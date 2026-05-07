@@ -14,6 +14,7 @@ import {
   loadProgress,
   saveProgress,
   updatePerformance,
+  getPracticeWordPool,
   shuffleWithinCategories,
   resetProgress
 } from '../utils/progressManager'
@@ -46,6 +47,7 @@ export default function SpellingTest({ words }: SpellingTestProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   const currentWord = orderedWords[currentIndex] || ''
+  const totalAttempts = performance.reduce((sum, p) => sum + p.successes + p.misses, 0)
 
   // Initialize performance data on mount
   useEffect(() => {
@@ -54,14 +56,17 @@ export default function SpellingTest({ words }: SpellingTestProps) {
     if (savedProgress && savedProgress.words.length === words.length) {
       // Load saved progress
       setPerformance(savedProgress.words)
-      setCurrentIndex(savedProgress.currentIndex)
-      const sorted = shuffleWithinCategories(words, savedProgress.words)
+      const practicePool = getPracticeWordPool(words, savedProgress.words, savedProgress.totalAttempts)
+      const sorted = shuffleWithinCategories(practicePool, savedProgress.words)
       setOrderedWords(sorted)
+      const safeIndex = Math.min(savedProgress.currentIndex, Math.max(sorted.length - 1, 0))
+      setCurrentIndex(safeIndex)
     } else {
       // Initialize new progress
       const newPerformance = initializePerformance(words)
       setPerformance(newPerformance)
-      const sorted = shuffleWithinCategories(words, newPerformance)
+      const practicePool = getPracticeWordPool(words, newPerformance, 0)
+      const sorted = shuffleWithinCategories(practicePool, newPerformance)
       setOrderedWords(sorted)
     }
   }, [words])
@@ -72,12 +77,12 @@ export default function SpellingTest({ words }: SpellingTestProps) {
       const progressData: ProgressData = {
         words: performance,
         currentIndex,
-        totalAttempts: performance.reduce((sum, p) => sum + p.successes + p.misses, 0),
+        totalAttempts,
         lastUpdated: new Date().toISOString()
       }
       saveProgress(progressData)
     }
-  }, [performance, currentIndex, orderedWords])
+  }, [performance, currentIndex, orderedWords, totalAttempts])
 
   // Initialize on component mount
   useEffect(() => {
@@ -129,7 +134,12 @@ export default function SpellingTest({ words }: SpellingTestProps) {
     const isCorrect = userInput.toLowerCase().trim() === currentWord.toLowerCase()
     
     // Update performance
-    const updatedPerformance = updatePerformance(performance, currentWord, isCorrect)
+    const updatedPerformance = updatePerformance(
+      performance,
+      currentWord,
+      isCorrect,
+      totalAttempts + 1
+    )
     setPerformance(updatedPerformance)
     
     // Do NOT re-sort - word stays same until Next is clicked
@@ -157,7 +167,8 @@ export default function SpellingTest({ words }: SpellingTestProps) {
       
       // Reshuffle every 5 words to maintain adaptive ordering
       if (newIndex % 5 === 0) {
-        const reshuffled = shuffleWithinCategories(orderedWords, performance)
+        const practicePool = getPracticeWordPool(words, performance, totalAttempts)
+        const reshuffled = shuffleWithinCategories(practicePool, performance)
         setOrderedWords(reshuffled)
         setCurrentIndex(0)
       }
@@ -184,7 +195,8 @@ export default function SpellingTest({ words }: SpellingTestProps) {
       const newProgress = resetProgress(words)
       setPerformance(newProgress.words)
       setCurrentIndex(0)
-      const sorted = shuffleWithinCategories(words, newProgress.words)
+      const practicePool = getPracticeWordPool(words, newProgress.words, 0)
+      const sorted = shuffleWithinCategories(practicePool, newProgress.words)
       setOrderedWords(sorted)
       setShowDashboard(false)
     }
@@ -194,7 +206,7 @@ export default function SpellingTest({ words }: SpellingTestProps) {
     const progressData: ProgressData = {
       words: performance,
       currentIndex,
-      totalAttempts: performance.reduce((sum, p) => sum + p.successes + p.misses, 0),
+      totalAttempts,
       lastUpdated: new Date().toISOString()
     }
     const json = JSON.stringify(progressData, null, 2)
