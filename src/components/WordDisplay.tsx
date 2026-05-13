@@ -33,7 +33,8 @@ export default function WordDisplay({ word }: WordDisplayProps) {
     <div className="word-display">
       <p className="word-label">Listen to the word and spell it:</p>
       <div className="word-section">
-        <button 
+        <button
+          type="button"
           className="btn-speaker"
           onClick={handleSpeak}
           title="Click to hear the word"

@@ -3,7 +3,6 @@ import '../styles/SpellingTest.css'
 import WordDisplay from './WordDisplay'
 import SpellingInput from './SpellingInput'
 import Feedback from './Feedback'
-import Progress from './Progress'
 import DefinitionDisplay from './DefinitionDisplay'
 import Statistics from './Statistics'
 import Dashboard from './Dashboard'
@@ -14,10 +13,11 @@ import {
   loadProgress,
   saveProgress,
   updatePerformance,
-  getPracticeWordPool,
-  shuffleWithinCategories,
-  resetProgress
-} from '../utils/progressManager'
+  buildPracticeOrder,
+  resetProgress,
+  rehydratePerformance,
+  normalizeWordKey
+} from '../utils/spellingEngine'
 
 /** Merriam-Webster Dictionary API key (personal app; exposed in client bundle) */
 const MERRIAM_WEBSTER_API_KEY = '2a1b51e3-7493-4ec5-b9a5-5649e9dc6f23'
@@ -54,10 +54,9 @@ export default function SpellingTest({ words }: SpellingTestProps) {
     const savedProgress = loadProgress()
     
     if (savedProgress && savedProgress.words.length === words.length) {
-      // Load saved progress
-      setPerformance(savedProgress.words)
-      const practicePool = getPracticeWordPool(words, savedProgress.words, savedProgress.totalAttempts)
-      const sorted = shuffleWithinCategories(practicePool, savedProgress.words)
+      const merged = rehydratePerformance(words, savedProgress.words)
+      setPerformance(merged)
+      const sorted = buildPracticeOrder(words, merged)
       setOrderedWords(sorted)
       const safeIndex = Math.min(savedProgress.currentIndex, Math.max(sorted.length - 1, 0))
       setCurrentIndex(safeIndex)
@@ -65,8 +64,7 @@ export default function SpellingTest({ words }: SpellingTestProps) {
       // Initialize new progress
       const newPerformance = initializePerformance(words)
       setPerformance(newPerformance)
-      const practicePool = getPracticeWordPool(words, newPerformance, 0)
-      const sorted = shuffleWithinCategories(practicePool, newPerformance)
+      const sorted = buildPracticeOrder(words, newPerformance)
       setOrderedWords(sorted)
     }
   }, [words])
@@ -131,16 +129,12 @@ export default function SpellingTest({ words }: SpellingTestProps) {
   }, [currentWord])
 
   const handleCheck = () => {
-    const isCorrect = userInput.toLowerCase().trim() === currentWord.toLowerCase()
-    
-    // Update performance
-    const updatedPerformance = updatePerformance(
-      performance,
-      currentWord,
-      isCorrect,
-      totalAttempts + 1
-    )
-    setPerformance(updatedPerformance)
+    const key = normalizeWordKey(currentWord)
+    if (!key) return
+
+    const isCorrect = normalizeWordKey(userInput) === key
+
+    setPerformance(prev => updatePerformance(prev, currentWord, isCorrect))
     
     // Do NOT re-sort - word stays same until Next is clicked
     
@@ -167,8 +161,7 @@ export default function SpellingTest({ words }: SpellingTestProps) {
       
       // Reshuffle every 5 words to maintain adaptive ordering
       if (newIndex % 5 === 0) {
-        const practicePool = getPracticeWordPool(words, performance, totalAttempts)
-        const reshuffled = shuffleWithinCategories(practicePool, performance)
+        const reshuffled = buildPracticeOrder(words, performance)
         setOrderedWords(reshuffled)
         setCurrentIndex(0)
       }
@@ -195,8 +188,7 @@ export default function SpellingTest({ words }: SpellingTestProps) {
       const newProgress = resetProgress(words)
       setPerformance(newProgress.words)
       setCurrentIndex(0)
-      const practicePool = getPracticeWordPool(words, newProgress.words, 0)
-      const sorted = shuffleWithinCategories(practicePool, newProgress.words)
+      const sorted = buildPracticeOrder(words, newProgress.words)
       setOrderedWords(sorted)
       setShowDashboard(false)
     }
@@ -223,7 +215,8 @@ export default function SpellingTest({ words }: SpellingTestProps) {
     <div className="spelling-test-container">
       <div className="header-with-controls">
         <h1 className="title">🎓 Spelling Test</h1>
-        <button 
+        <button
+          type="button"
           className="btn-toggle-dashboard"
           onClick={() => setShowDashboard(!showDashboard)}
         >
@@ -232,15 +225,14 @@ export default function SpellingTest({ words }: SpellingTestProps) {
       </div>
       
       {showDashboard ? (
-        <Dashboard 
-          performance={performance} 
+        <Dashboard
+          words={words}
+          performance={performance}
           onReset={handleReset}
           onExport={handleExport}
         />
       ) : (
         <>
-          <Progress current={currentIndex + 1} total={orderedWords.length} />
-          
           <Statistics 
             performance={performance} 
             currentWord={currentWord}
@@ -264,7 +256,8 @@ export default function SpellingTest({ words }: SpellingTestProps) {
             
             <div className="button-group-main">
               {feedback.type === 'none' ? (
-                <button 
+                <button
+                  type="button"
                   className="btn btn-check"
                   onClick={handleCheck}
                   disabled={userInput.trim().length === 0}
@@ -275,13 +268,15 @@ export default function SpellingTest({ words }: SpellingTestProps) {
                 <div className="feedback-and-buttons-wrapper">
                   <Feedback feedback={feedback} />
                   <div className="button-group">
-                    <button 
+                    <button
+                      type="button"
                       className="btn btn-check"
                       onClick={handleCheck}
                     >
                       Check Another ✓
                     </button>
-                    <button 
+                    <button
+                      type="button"
                       className="btn btn-next"
                       onClick={handleNext}
                       disabled={currentIndex === orderedWords.length - 1}
