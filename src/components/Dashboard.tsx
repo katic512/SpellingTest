@@ -148,7 +148,7 @@ export default function Dashboard({ words, performance, onReset, onExport }: Das
           <div className="stat-icon">⭐</div>
           <div className="stat-title">Mastered</div>
           <div className="stat-big">{stats.masteredWords}</div>
-          <div className="stat-subtitle">Perfect words</div>
+          <div className="stat-subtitle">5+ correct streak (miss resets streak)</div>
         </div>
 
         <div className="stat-card">
