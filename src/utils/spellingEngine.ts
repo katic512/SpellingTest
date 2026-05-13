@@ -13,7 +13,10 @@ export interface ProgressData {
 }
 
 const STORAGE_KEY = 'spelling-test-progress'
+/** Perfect streak: this many correct with zero misses. */
 const MASTERED_SUCCESS_THRESHOLD = 3
+/** Enough correct checks to rotate out even if there were past misses (e.g. 1 wrong, then 6 right). */
+const GRADUATED_SUCCESS_THRESHOLD = 6
 
 /** Canonical word key for matching (strips BOM / zero-width chars, trims, lowercases). */
 export const normalizeWordKey = (w: string): string =>
@@ -32,7 +35,8 @@ const shuffleArray = <T>(array: T[]): T[] => {
 }
 
 export const isMasteredWord = (p: WordPerformance): boolean =>
-  p.successes >= MASTERED_SUCCESS_THRESHOLD && p.misses === 0
+  (p.successes >= MASTERED_SUCCESS_THRESHOLD && p.misses === 0) ||
+  p.successes >= GRADUATED_SUCCESS_THRESHOLD
 
 /**
  * Initialize tracking rows in random order (breaks alphabetical bias).
