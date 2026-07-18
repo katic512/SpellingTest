@@ -12,6 +12,44 @@
   gap: 15px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.user-chip {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-loading {
+  color: white;
+  font-size: 1.25rem;
+  font-weight: 600;
+  text-align: center;
+  padding: 3rem;
+}
+
+.save-error {
+  background: #ffe3e3;
+  color: #c92a2a;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
 .title {
   text-align: center;
   color: white;
@@ -57,6 +95,14 @@
   padding: 40px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   animation: fadeIn 0.6s ease-out 0.2s both;
+}
+
+.all-mastered-message {
+  text-align: center;
+  font-size: 1.15rem;
+  color: #333;
+  line-height: 1.5;
+  margin: 0;
 }
 
 @keyframes fadeIn {

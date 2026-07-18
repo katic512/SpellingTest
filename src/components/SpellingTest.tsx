@@ -6,12 +6,14 @@ import Feedback from './Feedback'
 import DefinitionDisplay from './DefinitionDisplay'
 import Statistics from './Statistics'
 import Dashboard from './Dashboard'
+import { useAuth } from '../auth/AuthContext'
+import { fetchProgress, saveProgressToServer, fetchWordDefinition } from '../utils/api'
 import {
   WordPerformance,
   ProgressData,
   initializePerformance,
   loadProgress,
-  saveProgress,
+  clearLocalProgress,
   updatePerformance,
   buildPracticeOrder,
   resetProgress,
@@ -19,11 +21,9 @@ import {
   normalizeWordKey
 } from '../utils/spellingEngine'
 
-/** Merriam-Webster Dictionary API key (personal app; exposed in client bundle) */
-const MERRIAM_WEBSTER_API_KEY = '2a1b51e3-7493-4ec5-b9a5-5649e9dc6f23'
-
 interface SpellingTestProps {
   words: string[]
+  onOpenAdmin?: () => void
 }
 
 export interface FeedbackState {
@@ -32,7 +32,23 @@ export interface FeedbackState {
   correctSpelling?: string
 }
 
-export default function SpellingTest({ words }: SpellingTestProps) {
+function applyProgress(
+  words: string[],
+  saved: ProgressData | null
+): { performance: WordPerformance[]; ordered: string[]; index: number } {
+  if (saved && saved.words.length > 0) {
+    const merged = rehydratePerformance(words, saved.words)
+    const ordered = buildPracticeOrder(words, merged)
+    const index = Math.min(saved.currentIndex, Math.max(ordered.length - 1, 0))
+    return { performance: merged, ordered, index }
+  }
+  const performance = initializePerformance(words)
+  const ordered = buildPracticeOrder(words, performance)
+  return { performance, ordered, index: 0 }
+}
+
+export default function SpellingTest({ words, onOpenAdmin }: SpellingTestProps) {
+  const { user, logout } = useAuth()
   const [currentIndex, setCurrentIndex] = useState(0)
   const [userInput, setUserInput] = useState('')
   const [feedback, setFeedback] = useState<FeedbackState>({
@@ -44,43 +60,90 @@ export default function SpellingTest({ words }: SpellingTestProps) {
   const [performance, setPerformance] = useState<WordPerformance[]>([])
   const [orderedWords, setOrderedWords] = useState<string[]>([])
   const [showDashboard, setShowDashboard] = useState(false)
+  const [progressReady, setProgressReady] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [sessionAttempts, setSessionAttempts] = useState(0)
+  const [sessionSuccesses, setSessionSuccesses] = useState(0)
+  const [sessionMisses, setSessionMisses] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const skipNextSave = useRef(true)
 
   const currentWord = orderedWords[currentIndex] || ''
   const totalAttempts = performance.reduce((sum, p) => sum + p.successes + p.misses, 0)
 
-  // Initialize performance data on mount
+  // Load progress from Neon (migrate browser localStorage once if DB is empty)
   useEffect(() => {
-    const savedProgress = loadProgress()
-    
-    if (savedProgress && savedProgress.words.length === words.length) {
-      const merged = rehydratePerformance(words, savedProgress.words)
-      setPerformance(merged)
-      const sorted = buildPracticeOrder(words, merged)
-      setOrderedWords(sorted)
-      const safeIndex = Math.min(savedProgress.currentIndex, Math.max(sorted.length - 1, 0))
-      setCurrentIndex(safeIndex)
-    } else {
-      // Initialize new progress
-      const newPerformance = initializePerformance(words)
-      setPerformance(newPerformance)
-      const sorted = buildPracticeOrder(words, newPerformance)
-      setOrderedWords(sorted)
-    }
-  }, [words])
+    let cancelled = false
+    setProgressReady(false)
+    skipNextSave.current = true
+    setSessionAttempts(0)
+    setSessionSuccesses(0)
+    setSessionMisses(0)
 
-  // Save progress whenever it changes
-  useEffect(() => {
-    if (performance.length > 0 && orderedWords.length > 0) {
-      const progressData: ProgressData = {
-        words: performance,
-        currentIndex,
-        totalAttempts,
-        lastUpdated: new Date().toISOString()
+    const load = async () => {
+      try {
+        let remote = await fetchProgress()
+        const local = loadProgress()
+
+        if ((!remote || remote.words.length === 0) && local && local.words.length > 0) {
+          const migrated: ProgressData = {
+            ...local,
+            lastUpdated: new Date().toISOString()
+          }
+          await saveProgressToServer(migrated)
+          clearLocalProgress()
+          remote = migrated
+        }
+
+        if (cancelled) return
+        const applied = applyProgress(words, remote)
+        setPerformance(applied.performance)
+        setOrderedWords(applied.ordered)
+        setCurrentIndex(applied.index)
+      } catch (err) {
+        console.error('Failed to load server progress:', err)
+        if (cancelled) return
+        const applied = applyProgress(words, loadProgress())
+        setPerformance(applied.performance)
+        setOrderedWords(applied.ordered)
+        setCurrentIndex(applied.index)
+      } finally {
+        if (!cancelled) setProgressReady(true)
       }
-      saveProgress(progressData)
     }
-  }, [performance, currentIndex, orderedWords, totalAttempts])
+
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [words, user?.id])
+
+  // Persist progress to Neon whenever it changes
+  useEffect(() => {
+    if (!progressReady || performance.length === 0 || orderedWords.length === 0) return
+    if (skipNextSave.current) {
+      skipNextSave.current = false
+      return
+    }
+
+    const progressData: ProgressData = {
+      words: performance,
+      currentIndex,
+      totalAttempts,
+      lastUpdated: new Date().toISOString()
+    }
+
+    const timer = window.setTimeout(() => {
+      saveProgressToServer(progressData)
+        .then(() => setSaveError(null))
+        .catch(err => {
+          console.error('Failed to save progress:', err)
+          setSaveError(err instanceof Error ? err.message : 'Failed to save progress')
+        })
+    }, 400)
+
+    return () => window.clearTimeout(timer)
+  }, [performance, currentIndex, orderedWords, totalAttempts, progressReady])
 
   // Initialize on component mount
   useEffect(() => {
@@ -89,34 +152,15 @@ export default function SpellingTest({ words }: SpellingTestProps) {
     inputRef.current?.focus()
   }, [])
 
-  // Fetch definition when word changes (Merriam-Webster Elementary Dictionary, sd2)
+  // Fetch definition from DB (server falls back to dictionary API and caches)
   useEffect(() => {
     const fetchDefinition = async () => {
       if (!currentWord) return
 
       setLoadingDefinition(true)
       try {
-        const url = `https://www.dictionaryapi.com/api/v3/references/sd2/json/${encodeURIComponent(currentWord)}?key=${encodeURIComponent(MERRIAM_WEBSTER_API_KEY)}`
-        const response = await fetch(url)
-        if (!response.ok) {
-          setDefinition('Definition not available')
-          return
-        }
-
-        const data: unknown = await response.json()
-        if (!Array.isArray(data) || data.length === 0) {
-          setDefinition('Definition not available')
-          return
-        }
-
-        const first = data[0]
-        if (typeof first === 'string') {
-          setDefinition('Definition not available')
-          return
-        }
-
-        const shortdef = (first as { shortdef?: string[] }).shortdef?.filter(Boolean) ?? []
-        setDefinition(shortdef[0] ?? 'Definition not available')
+        const meaning = await fetchWordDefinition(currentWord)
+        setDefinition(meaning ?? 'Definition not available')
       } catch (error) {
         console.error('Error fetching definition:', error)
         setDefinition('Definition not available')
@@ -135,9 +179,15 @@ export default function SpellingTest({ words }: SpellingTestProps) {
     const isCorrect = normalizeWordKey(userInput) === key
 
     setPerformance(prev => updatePerformance(prev, currentWord, isCorrect))
-    
+    setSessionAttempts(n => n + 1)
+    if (isCorrect) {
+      setSessionSuccesses(n => n + 1)
+    } else {
+      setSessionMisses(n => n + 1)
+    }
+
     // Do NOT re-sort - word stays same until Next is clicked
-    
+
     if (isCorrect) {
       setFeedback({
         type: 'correct',
@@ -155,28 +205,21 @@ export default function SpellingTest({ words }: SpellingTestProps) {
   }
 
   const handleNext = () => {
-    if (currentIndex < orderedWords.length - 1) {
-      const newIndex = currentIndex + 1
-      setCurrentIndex(newIndex)
-      
-      // Reshuffle every 5 words to maintain adaptive ordering
-      if (newIndex % 5 === 0) {
-        const reshuffled = buildPracticeOrder(words, performance)
-        setOrderedWords(reshuffled)
-        setCurrentIndex(0)
-      }
-      
-      setUserInput('')
-      setFeedback({ type: 'none', message: '' })
-      inputRef.current?.focus()
-    }
+    // Rebuild queue every Next so words with 1–4 successes reappear soon,
+    // and words that just hit 5 successes drop out.
+    const reshuffled = buildPracticeOrder(words, performance)
+    setOrderedWords(reshuffled)
+    setCurrentIndex(0)
+    setUserInput('')
+    setFeedback({ type: 'none', message: '' })
+    inputRef.current?.focus()
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       if (feedback.type === 'none' && userInput.trim().length > 0) {
         handleCheck()
-      } else if (feedback.type === 'correct' && currentIndex < orderedWords.length - 1) {
+      } else if (feedback.type === 'correct') {
         handleNext()
       }
       // For incorrect answers, user can keep typing to try again or click "Check Another"
@@ -211,31 +254,65 @@ export default function SpellingTest({ words }: SpellingTestProps) {
     URL.revokeObjectURL(url)
   }
 
+  if (!progressReady) {
+    return (
+      <div className="spelling-test-container">
+        <div className="progress-loading">Loading your progress…</div>
+      </div>
+    )
+  }
+
   return (
     <div className="spelling-test-container">
       <div className="header-with-controls">
         <h1 className="title">🎓 Spelling Test</h1>
-        <button
-          type="button"
-          className="btn-toggle-dashboard"
-          onClick={() => setShowDashboard(!showDashboard)}
-        >
-          {showDashboard ? 'Close Dashboard' : '📊 Show Dashboard'}
-        </button>
+        <div className="header-actions">
+          <span className="user-chip" title={user?.username}>
+            {user?.username}
+          </span>
+          {onOpenAdmin && (
+            <button type="button" className="btn-toggle-dashboard" onClick={onOpenAdmin}>
+              Admin
+            </button>
+          )}
+          <button type="button" className="btn-toggle-dashboard" onClick={logout}>
+            Sign out
+          </button>
+          <button
+            type="button"
+            className="btn-toggle-dashboard"
+            onClick={() => setShowDashboard(!showDashboard)}
+          >
+            {showDashboard ? 'Close Dashboard' : '📊 Show Dashboard'}
+          </button>
+        </div>
       </div>
+      {saveError && <div className="save-error">Could not save: {saveError}</div>}
       
       {showDashboard ? (
         <Dashboard
           words={words}
           performance={performance}
+          sessionAttempts={sessionAttempts}
+          sessionSuccesses={sessionSuccesses}
+          sessionMisses={sessionMisses}
           onReset={handleReset}
           onExport={handleExport}
         />
+      ) : orderedWords.length === 0 ? (
+        <div className="test-card">
+          <p className="all-mastered-message">
+            All words have 5 correct in a row. Open the dashboard or reset if you want to practice again.
+          </p>
+        </div>
       ) : (
         <>
-          <Statistics 
-            performance={performance} 
+          <Statistics
+            performance={performance}
             currentWord={currentWord}
+            sessionAttempts={sessionAttempts}
+            sessionSuccesses={sessionSuccesses}
+            sessionMisses={sessionMisses}
           />
           
           <div className="test-card">
@@ -279,7 +356,7 @@ export default function SpellingTest({ words }: SpellingTestProps) {
                       type="button"
                       className="btn btn-next"
                       onClick={handleNext}
-                      disabled={currentIndex === orderedWords.length - 1}
+                      disabled={orderedWords.length === 0}
                     >
                       Next →
                     </button>

@@ -7,6 +7,9 @@ type SortKey = 'word' | 'successes' | 'misses' | 'total' | 'status'
 interface DashboardProps {
   words: string[]
   performance: WordPerformance[]
+  sessionAttempts: number
+  sessionSuccesses: number
+  sessionMisses: number
   onReset: () => void
   onExport: () => void
 }
@@ -44,8 +47,18 @@ function buildRow(display: string, p: WordPerformance | undefined): WordRow {
   return { display, successes, misses, mastered, total, status, statusTone }
 }
 
-export default function Dashboard({ words, performance, onReset, onExport }: DashboardProps) {
+export default function Dashboard({
+  words,
+  performance,
+  sessionAttempts,
+  sessionSuccesses,
+  sessionMisses,
+  onReset,
+  onExport
+}: DashboardProps) {
   const stats = getOverallStats(performance)
+  const sessionAccuracy =
+    sessionAttempts > 0 ? ((sessionSuccesses / sessionAttempts) * 100).toFixed(1) : '0.0'
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('word')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
@@ -137,6 +150,15 @@ export default function Dashboard({ words, performance, onReset, onExport }: Das
       </div>
 
       <div className="dashboard-grid">
+        <div className="stat-card session-card">
+          <div className="stat-icon">⏱️</div>
+          <div className="stat-title">This Session</div>
+          <div className="stat-big">{sessionAttempts}</div>
+          <div className="stat-subtitle">
+            {sessionSuccesses} correct · {sessionMisses} miss · {sessionAccuracy}%
+          </div>
+        </div>
+
         <div className="stat-card">
           <div className="stat-icon">🎯</div>
           <div className="stat-title">Accuracy</div>

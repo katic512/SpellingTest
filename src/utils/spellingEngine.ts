@@ -14,7 +14,7 @@ export interface ProgressData {
 
 const STORAGE_KEY = 'spelling-test-progress'
 /** Mastered for rotation: this many consecutive-success checks (miss resets successes to 0). */
-const MASTERED_SUCCESS_THRESHOLD = 5
+export const MASTERED_SUCCESS_THRESHOLD = 5
 
 /** Canonical word key for matching (strips BOM / zero-width chars, trims, lowercases). */
 export const normalizeWordKey = (w: string): string =>
@@ -127,6 +127,14 @@ export const saveProgress = (data: ProgressData): void => {
   }
 }
 
+export const clearLocalProgress = (): void => {
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+  } catch (error) {
+    console.error('Error clearing local progress:', error)
+  }
+}
+
 export const updatePerformance = (
   performance: WordPerformance[],
   word: string,
@@ -162,8 +170,9 @@ export const getWordStats = (
 }
 
 /**
- * Full practice queue: mistake words → never attempted → in-flight (not yet mastered).
- * Mastered words (5+ successes in current streak) are omitted until everything else is done.
+ * Full practice queue: mistake words → in-progress (1–4 successes) → never attempted.
+ * Mastered words (5+ successes in current streak) are omitted.
+ * In-progress comes before fresh so a first correct answer still reappears until mastered.
  */
 export const buildPracticeOrder = (
   allWords: string[],
@@ -188,19 +197,18 @@ export const buildPracticeOrder = (
     if (isMasteredWord(p)) continue
 
     const total = p.successes + p.misses
-    if (p.misses > 0) mistaken.push(w)
+    if (p.misses > 0 && p.successes === 0) mistaken.push(w)
     else if (total === 0) fresh.push(w)
     else ongoing.push(w)
   }
 
   const ordered = [
     ...shuffleArray(mistaken),
-    ...shuffleArray(fresh),
-    ...shuffleArray(ongoing)
+    ...shuffleArray(ongoing),
+    ...shuffleArray(fresh)
   ]
 
-  if (ordered.length > 0) return ordered
-  return shuffleArray([...allWords])
+  return ordered
 }
 
 /**
