@@ -25,10 +25,13 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editWord, setEditWord] = useState('')
   const [editDefinition, setEditDefinition] = useState('')
+  const [fetchingDefId, setFetchingDefId] = useState<number | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)
     setError(null)
+    setSuccess(null)
     try {
       setWords(await fetchAdminWords())
     } catch (err) {
@@ -41,6 +44,41 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
   useEffect(() => {
     load()
   }, [])
+
+  const handleFetchDefinition = async (id: number, currentDef: string | null) => {
+    if (currentDef && currentDef.trim()) {
+      setError('Definition already exists. Clear it first if you want to refetch from API.')
+      return
+    }
+
+    setFetchingDefId(id)
+    setError(null)
+    setSuccess(null)
+    try {
+      const wordRow = words.find(w => w.id === id)
+      if (!wordRow) return
+
+      const res = await fetch(`/api/words/${encodeURIComponent(wordRow.word)}/definition`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('spelling-test-token')}` }
+      })
+      if (!res.ok) throw new Error('Failed to fetch definition')
+      const data = await res.json()
+      const definition = data.definition as string | null
+
+      if (definition) {
+        const updated = await updateAdminWord(id, { definition })
+        setWords(prev => prev.map(w => (w.id === updated.id ? updated : w)))
+        setSuccess(`Definition fetched for "${wordRow.word}"`)
+        setTimeout(() => setSuccess(null), 3000)
+      } else {
+        setError(`No definition found in API for "${wordRow.word}"`)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch definition')
+    } finally {
+      setFetchingDefId(null)
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -57,11 +95,14 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
     if (!newWord.trim()) return
     setSaving(true)
     setError(null)
+    setSuccess(null)
     try {
       const created = await createAdminWord(newWord.trim(), newDefinition.trim() || undefined)
       setWords(prev => [...prev, created].sort((a, b) => a.word.localeCompare(b.word)))
       setNewWord('')
       setNewDefinition('')
+      setSuccess(`Word "${created.word}" added successfully`)
+      setTimeout(() => setSuccess(null), 3000)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add word')
     } finally {
@@ -73,6 +114,7 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
     setEditingId(row.id)
     setEditWord(row.word)
     setEditDefinition(row.definition ?? '')
+    setSuccess(null)
   }
 
   const cancelEdit = () => {
@@ -85,6 +127,7 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
     if (editingId == null || !editWord.trim()) return
     setSaving(true)
     setError(null)
+    setSuccess(null)
     try {
       const updated = await updateAdminWord(editingId, {
         word: editWord.trim(),
@@ -95,6 +138,8 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
           .map(w => (w.id === updated.id ? updated : w))
           .sort((a, b) => a.word.localeCompare(b.word))
       )
+      setSuccess(`Word updated successfully`)
+      setTimeout(() => setSuccess(null), 3000)
       cancelEdit()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update word')
@@ -104,15 +149,18 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
   }
 
   const handleDelete = async (row: AdminWord) => {
-    if (!window.confirm(`Delete “${row.word}”? This also removes user progress for that word.`)) {
+    if (!window.confirm(`Delete "${row.word}"? This also removes user progress for that word.`)) {
       return
     }
     setSaving(true)
     setError(null)
+    setSuccess(null)
     try {
       await deleteAdminWord(row.id)
       setWords(prev => prev.filter(w => w.id !== row.id))
       if (editingId === row.id) cancelEdit()
+      setSuccess(`Word "${row.word}" deleted successfully`)
+      setTimeout(() => setSuccess(null), 3000)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete word')
     } finally {
@@ -140,6 +188,7 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
       </div>
 
       {error && <div className="admin-error">{error}</div>}
+      {success && <div className="admin-success">{success}</div>}
 
       <form className="admin-add" onSubmit={handleAdd}>
         <h2>Add word</h2>
@@ -191,7 +240,7 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
             </thead>
             <tbody>
               {filtered.map(row => (
-                <tr key={row.id}>
+                <tr key={row.id} className={!row.definition ? 'admin-row-missing-def' : ''}>
                   {editingId === row.id ? (
                     <>
                       <td>
@@ -234,7 +283,11 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
                     <>
                       <td className="admin-word-cell">{row.word}</td>
                       <td className="admin-def-cell">
-                        {row.definition || <span className="admin-missing">No meaning yet</span>}
+                        {row.definition ? (
+                          row.definition
+                        ) : (
+                          <span className="admin-missing">No meaning yet</span>
+                        )}
                       </td>
                       <td className="admin-actions">
                         <button
@@ -245,6 +298,16 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
                         >
                           Edit
                         </button>
+                        {!row.definition && (
+                          <button
+                            type="button"
+                            className="admin-btn admin-btn-secondary"
+                            onClick={() => handleFetchDefinition(row.id, row.definition)}
+                            disabled={saving || fetchingDefId === row.id}
+                          >
+                            {fetchingDefId === row.id ? '⟳' : 'Fetch'}
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="admin-btn admin-btn-danger"

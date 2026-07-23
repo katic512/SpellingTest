@@ -46,6 +46,15 @@
   font-weight: 600;
 }
 
+.admin-success {
+  background: #d4edda;
+  color: #155724;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  font-weight: 600;
+}
+
 .admin-add {
   background: #f5f7fa;
   border-radius: 12px;
@@ -108,6 +117,10 @@
   background: #dc3545;
 }
 
+.admin-btn-secondary {
+  background: #17a2b8;
+}
+
 .admin-loading,
 .admin-empty {
   text-align: center;
@@ -156,6 +169,14 @@
 .admin-missing {
   color: #999;
   font-style: italic;
+}
+
+.admin-row-missing-def {
+  background-color: #fffbf0;
+}
+
+.admin-row-missing-def:hover {
+  background-color: #fff8e6;
 }
 
 @media (max-width: 700px) {
