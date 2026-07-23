@@ -4,9 +4,18 @@ import '../styles/Statistics.css'
 interface StatisticsProps {
   performance: WordPerformance[]
   currentWord: string
+  sessionAttempts: number
+  sessionSuccesses: number
+  sessionMisses: number
 }
 
-export default function Statistics({ performance, currentWord }: StatisticsProps) {
+export default function Statistics({
+  performance,
+  currentWord,
+  sessionAttempts,
+  sessionSuccesses,
+  sessionMisses
+}: StatisticsProps) {
   const key = normalizeWordKey(currentWord)
   const currentPerf = key ? performance.find(p => p.word === key) : undefined
 
@@ -18,6 +27,8 @@ export default function Statistics({ performance, currentWord }: StatisticsProps
   const misses = currentPerf?.misses ?? 0
   const total = successes + misses
   const accuracy = total > 0 ? ((successes / total) * 100).toFixed(0) : 'N/A'
+  const sessionAccuracy =
+    sessionAttempts > 0 ? ((sessionSuccesses / sessionAttempts) * 100).toFixed(0) : '—'
 
   return (
     <div className="statistics">
@@ -32,6 +43,18 @@ export default function Statistics({ performance, currentWord }: StatisticsProps
       <div className="stat-item">
         <div className="stat-label">Accuracy</div>
         <div className="stat-value large">{accuracy}%</div>
+      </div>
+
+      <div className="stat-item stat-item-session">
+        <div className="stat-label">This Session</div>
+        <div className="stat-value">
+          <span className="stat-total">{sessionAttempts} attempts</span>
+          <span className="stat-session-detail">
+            <span className="stat-success">✅ {sessionSuccesses}</span>
+            <span className="stat-miss">❌ {sessionMisses}</span>
+            <span className="stat-rate">{sessionAccuracy}%</span>
+          </span>
+        </div>
       </div>
 
       <div className="stat-item">
