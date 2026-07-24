@@ -3,6 +3,7 @@
   "outputDirectory": "dist",
   "env": {
     "DATABASE_URL": "@DATABASE_URL",
+    "JWT_SECRET": "@JWT_SECRET",
     "MERRIAM_WEBSTER_API_KEY": "@MERRIAM_WEBSTER_API_KEY"
   },
   "functions": {
