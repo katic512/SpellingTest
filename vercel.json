@@ -1,8 +1,14 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "env": {
+    "DATABASE_URL": "@DATABASE_URL",
+    "JWT_SECRET": "@JWT_SECRET",
+    "MERRIAM_WEBSTER_API_KEY": "@MERRIAM_WEBSTER_API_KEY"
+  },
   "functions": {
     "api/**": {
+      "runtime": "nodejs18.x",
       "maxDuration": 10
     }
   },
@@ -10,6 +16,10 @@
     {
       "src": "/api/(.*)",
       "dest": "/api/index.ts"
+    },
+    {
+      "src": "/assets/(.*)",
+      "dest": "/assets/$1"
     },
     {
       "src": "/(.*)",
