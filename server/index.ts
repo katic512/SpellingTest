@@ -14,6 +14,26 @@ const PORT = Number(process.env.PORT) || 3001
 app.use(cors())
 app.use(express.json({ limit: '5mb' }))
 
+// Initialize database for serverless environments
+let dbInitialized = false
+async function ensureDbInitialized() {
+  if (!dbInitialized) {
+    await initDb()
+    dbInitialized = true
+  }
+}
+
+// Middleware to ensure DB is initialized (for Vercel serverless)
+app.use(async (_req, _res, next) => {
+  try {
+    await ensureDbInitialized()
+    next()
+  } catch (err) {
+    console.error('DB initialization error:', err)
+    next(err)
+  }
+})
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true })
 })
@@ -687,7 +707,13 @@ async function start() {
   })
 }
 
-start().catch(err => {
-  console.error('Failed to start server:', err)
-  process.exit(1)
-})
+// Only start the server if this file is run directly (not imported)
+if (import.meta.url === `file://${process.argv[1]}`) {
+  start().catch(err => {
+    console.error('Failed to start server:', err)
+    process.exit(1)
+  })
+}
+
+// Export app for Vercel serverless function
+export default app
