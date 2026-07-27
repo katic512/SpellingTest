@@ -4,7 +4,14 @@ import {
   createAdminWord,
   deleteAdminWord,
   fetchAdminWords,
-  updateAdminWord
+  updateAdminWord,
+  getAdminUsersRewards,
+  updateUserRewards,
+  UserReward,
+  getAdminUsers,
+  deleteAdminUser,
+  toggleUserStatus,
+  UserManagement
 } from '../utils/api'
 import { useAuth } from '../auth/AuthContext'
 import './AdminWords.css'
@@ -15,7 +22,10 @@ interface AdminWordsProps {
 
 export default function AdminWords({ onBack }: AdminWordsProps) {
   const { logout, user } = useAuth()
+  const [tab, setTab] = useState<'words' | 'rewards' | 'users'>('words')
   const [words, setWords] = useState<AdminWord[]>([])
+  const [users, setUsers] = useState<UserReward[]>([])
+  const [managedUsers, setManagedUsers] = useState<UserManagement[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -26,6 +36,8 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
   const [editWord, setEditWord] = useState('')
   const [editDefinition, setEditDefinition] = useState('')
   const [fetchingDefId, setFetchingDefId] = useState<number | null>(null)
+  const [editingUserId, setEditingUserId] = useState<number | null>(null)
+  const [editBalance, setEditBalance] = useState('')
   const [success, setSuccess] = useState<string | null>(null)
 
   const load = async () => {
@@ -33,9 +45,15 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
     setError(null)
     setSuccess(null)
     try {
-      setWords(await fetchAdminWords())
+      if (tab === 'words') {
+        setWords(await fetchAdminWords())
+      } else if (tab === 'rewards') {
+        setUsers(await getAdminUsersRewards())
+      } else if (tab === 'users') {
+        setManagedUsers(await getAdminUsers())
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load words')
+      setError(err instanceof Error ? err.message : `Failed to load ${tab}`)
     } finally {
       setLoading(false)
     }
@@ -43,7 +61,7 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
 
   useEffect(() => {
     load()
-  }, [])
+  }, [tab])
 
   const handleFetchDefinition = async (id: number, currentDef: string | null) => {
     if (currentDef && currentDef.trim()) {
@@ -168,16 +186,115 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
     }
   }
 
+  const startEditUser = (userReward: UserReward) => {
+    setEditingUserId(userReward.id)
+    setEditBalance((userReward.balance_cents / 100).toFixed(2))
+    setSuccess(null)
+  }
+
+  const cancelEditUser = () => {
+    setEditingUserId(null)
+    setEditBalance('')
+  }
+
+  const saveEditUser = async () => {
+    if (editingUserId == null) return
+    const balanceCents = Math.round(parseFloat(editBalance || '0') * 100)
+    if (balanceCents < 0) {
+      setError('Balance cannot be negative')
+      return
+    }
+    setSaving(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const updated = await updateUserRewards(editingUserId, { balance_cents: balanceCents })
+      setUsers(prev =>
+        prev
+          .map(u => (u.id === updated.id ? updated : u))
+          .sort((a, b) => a.username.localeCompare(b.username))
+      )
+      setSuccess(`Balance updated successfully`)
+      setTimeout(() => setSuccess(null), 3000)
+      cancelEditUser()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update balance')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteUser = async (managedUser: UserManagement) => {
+    if (!window.confirm(`Delete user "${managedUser.username}"? This cannot be undone.`)) {
+      return
+    }
+    setSaving(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      await deleteAdminUser(managedUser.id)
+      setManagedUsers(prev => prev.filter(u => u.id !== managedUser.id))
+      setSuccess(`User "${managedUser.username}" deleted successfully`)
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete user')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleToggleUserStatus = async (managedUser: UserManagement) => {
+    setSaving(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const updated = await toggleUserStatus(managedUser.id, !managedUser.is_enabled)
+      setManagedUsers(prev =>
+        prev
+          .map(u => (u.id === updated.id ? updated : u))
+          .sort((a, b) => a.username.localeCompare(b.username))
+      )
+      const action = !managedUser.is_enabled ? 'enabled' : 'disabled'
+      setSuccess(`User "${managedUser.username}" ${action}`)
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update user status')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="admin-words">
       <div className="admin-header">
         <div>
-          <h1>Admin · Vocabulary</h1>
+          <h1>Admin</h1>
           <p className="admin-subtitle">
-            Signed in as {user?.username} · {words.length} words
+            Signed in as {user?.username} · {tab === 'words' ? `${words.length} words` : tab === 'rewards' ? `${users.length} users` : `${managedUsers.length} accounts`}
           </p>
         </div>
         <div className="admin-header-actions">
+          <button
+            type="button"
+            className={`admin-btn ${tab === 'words' ? 'admin-btn-active' : ''}`}
+            onClick={() => setTab('words')}
+          >
+            📚 Vocabulary
+          </button>
+          <button
+            type="button"
+            className={`admin-btn ${tab === 'rewards' ? 'admin-btn-active' : ''}`}
+            onClick={() => setTab('rewards')}
+          >
+            💰 Rewards
+          </button>
+          <button
+            type="button"
+            className={`admin-btn ${tab === 'users' ? 'admin-btn-active' : ''}`}
+            onClick={() => setTab('users')}
+          >
+            👥 Users
+          </button>
           <button type="button" className="admin-btn" onClick={onBack}>
             ← Practice
           </button>
@@ -190,70 +307,72 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
       {error && <div className="admin-error">{error}</div>}
       {success && <div className="admin-success">{success}</div>}
 
-      <form className="admin-add" onSubmit={handleAdd}>
-        <h2>Add word</h2>
-        <div className="admin-add-row">
-          <input
-            className="admin-input"
-            placeholder="Spelling"
-            value={newWord}
-            onChange={e => setNewWord(e.target.value)}
-            disabled={saving}
-            required
-          />
-          <input
-            className="admin-input admin-input-wide"
-            placeholder="Meaning (optional — fetched from API if blank)"
-            value={newDefinition}
-            onChange={e => setNewDefinition(e.target.value)}
-            disabled={saving}
-          />
-          <button type="submit" className="admin-btn admin-btn-primary" disabled={saving}>
-            Add
-          </button>
-        </div>
-      </form>
+      {tab === 'words' ? (
+        <>
+          <form className="admin-add" onSubmit={handleAdd}>
+            <h2>Add word</h2>
+            <div className="admin-add-row">
+              <input
+                className="admin-input"
+                placeholder="Spelling"
+                value={newWord}
+                onChange={e => setNewWord(e.target.value)}
+                disabled={saving}
+                required
+              />
+              <input
+                className="admin-input admin-input-wide"
+                placeholder="Meaning (optional — fetched from API if blank)"
+                value={newDefinition}
+                onChange={e => setNewDefinition(e.target.value)}
+                disabled={saving}
+              />
+              <button type="submit" className="admin-btn admin-btn-primary" disabled={saving}>
+                Add
+              </button>
+            </div>
+          </form>
 
-      <div className="admin-toolbar">
-        <input
-          className="admin-input"
-          placeholder="Search words or meanings…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
-        <button type="button" className="admin-btn admin-btn-muted" onClick={load} disabled={loading}>
-          Refresh
-        </button>
-      </div>
+          <div className="admin-toolbar">
+            <input
+              className="admin-input"
+              placeholder="Search words or meanings…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            <button type="button" className="admin-btn admin-btn-muted" onClick={load} disabled={loading}>
+              Refresh
+            </button>
+          </div>
 
-      {loading ? (
-        <div className="admin-loading">Loading vocabulary…</div>
-      ) : (
-        <div className="admin-table-wrap">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>Word</th>
-                <th>Meaning</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(row => (
-                <tr key={row.id} className={!row.definition ? 'admin-row-missing-def' : ''}>
-                  {editingId === row.id ? (
-                    <>
-                      <td>
-                        <input
-                          className="admin-input"
-                          value={editWord}
-                          onChange={e => setEditWord(e.target.value)}
-                          disabled={saving}
-                        />
-                      </td>
-                      <td>
-                        <textarea
-                          className="admin-textarea"
+          {loading ? (
+            <div className="admin-loading">Loading vocabulary…</div>
+          ) : (
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Word</th>
+                    <th>Meaning</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(row => (
+                    <tr key={row.id} className={!row.definition ? 'admin-row-missing-def' : ''}>
+                      {editingId === row.id ? (
+                        <>
+                          <td>
+                            <input
+                              className="admin-input"
+                              value={editWord}
+                              onChange={e => setEditWord(e.target.value)}
+                              disabled={saving}
+                            />
+                          </td>
+                          <td>
+                            <textarea
+                              className="admin-textarea"
                           value={editDefinition}
                           onChange={e => setEditDefinition(e.target.value)}
                           disabled={saving}
@@ -329,8 +448,182 @@ export default function AdminWords({ onBack }: AdminWordsProps) {
                 </tr>
               )}
             </tbody>
-          </table>
-        </div>
+              </table>
+            </div>
+          )}
+        </>
+      ) : tab === 'rewards' ? (
+        <>
+          <div className="admin-toolbar">
+            <input
+              className="admin-input"
+              placeholder="Search users…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            <button type="button" className="admin-btn admin-btn-muted" onClick={load} disabled={loading}>
+              Refresh
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="admin-loading">Loading users…</div>
+          ) : (
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Balance</th>
+                    <th>Earned</th>
+                    <th>Cashed Out</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users
+                    .filter(u => u.username.toLowerCase().includes(search.toLowerCase()))
+                    .map(userRow => (
+                      <tr key={userRow.id}>
+                        <td>{userRow.username}</td>
+                        {editingUserId === userRow.id ? (
+                          <>
+                            <td>
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="admin-input"
+                                value={editBalance}
+                                onChange={e => setEditBalance(e.target.value)}
+                                disabled={saving}
+                              />
+                            </td>
+                            <td className="admin-money">${(userRow.total_earned_cents / 100).toFixed(2)}</td>
+                            <td className="admin-money">${(userRow.total_cashed_out_cents / 100).toFixed(2)}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="admin-action-btn"
+                                onClick={saveEditUser}
+                                disabled={saving}
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                className="admin-action-btn"
+                                onClick={cancelEditUser}
+                                disabled={saving}
+                              >
+                                Cancel
+                              </button>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="admin-money">${(userRow.balance_cents / 100).toFixed(2)}</td>
+                            <td className="admin-money">${(userRow.total_earned_cents / 100).toFixed(2)}</td>
+                            <td className="admin-money">${(userRow.total_cashed_out_cents / 100).toFixed(2)}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="admin-action-btn"
+                                onClick={() => startEditUser(userRow)}
+                                disabled={saving}
+                              >
+                                Edit
+                              </button>
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  {users.filter(u => u.username.toLowerCase().includes(search.toLowerCase())).length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="admin-empty">
+                        No users
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="admin-toolbar">
+            <input
+              className="admin-input"
+              placeholder="Search users…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            <button type="button" className="admin-btn admin-btn-muted" onClick={load} disabled={loading}>
+              Refresh
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="admin-loading">Loading users…</div>
+          ) : (
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Username</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {managedUsers
+                    .filter(u => u.username.toLowerCase().includes(search.toLowerCase()))
+                    .sort((a, b) => a.username.localeCompare(b.username))
+                    .map(managedUser => (
+                      <tr key={managedUser.id}>
+                        <td className="admin-username">{managedUser.username}</td>
+                        <td className="admin-role">{managedUser.role}</td>
+                        <td>
+                          <span className={`admin-status ${managedUser.is_enabled ? 'admin-status-enabled' : 'admin-status-disabled'}`}>
+                            {managedUser.is_enabled ? '✓ Enabled' : '✗ Disabled'}
+                          </span>
+                        </td>
+                        <td className="admin-date">{new Date(managedUser.created_at).toLocaleDateString()}</td>
+                        <td className="admin-actions">
+                          <button
+                            type="button"
+                            className={`admin-btn ${managedUser.is_enabled ? 'admin-btn-secondary' : 'admin-btn-primary'}`}
+                            onClick={() => handleToggleUserStatus(managedUser)}
+                            disabled={saving}
+                          >
+                            {managedUser.is_enabled ? 'Disable' : 'Enable'}
+                          </button>
+                          <button
+                            type="button"
+                            className="admin-btn admin-btn-danger"
+                            onClick={() => handleDeleteUser(managedUser)}
+                            disabled={saving}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  {managedUsers.filter(u => u.username.toLowerCase().includes(search.toLowerCase())).length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="admin-empty">
+                        No users
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

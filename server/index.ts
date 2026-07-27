@@ -362,6 +362,324 @@ app.put('/api/progress', requireAuth, async (req: AuthedRequest, res) => {
   }
 })
 
+// Rewards endpoints
+app.get('/api/rewards/balance', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.userId
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const result = await pool.query<{
+      balance_cents: number
+      total_earned_cents: number
+      total_cashed_out_cents: number
+    }>(
+      `SELECT balance_cents, total_earned_cents, total_cashed_out_cents 
+       FROM users WHERE id = $1`,
+      [userId]
+    )
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'User not found' })
+      return
+    }
+
+    res.json(result.rows[0])
+  } catch (error) {
+    console.error('Error fetching rewards:', error)
+    res.status(500).json({ error: 'Failed to fetch rewards' })
+  }
+})
+
+app.post('/api/rewards/add', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.userId
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const { reward_cents = 5 } = req.body
+    console.log('rewards/add - userId:', userId, 'reward_cents:', reward_cents, 'body:', req.body)
+
+    const result = await pool.query<{
+      balance_cents: number
+      total_earned_cents: number
+      total_cashed_out_cents: number
+    }>(
+      `UPDATE users 
+       SET balance_cents = balance_cents + $1, 
+           total_earned_cents = total_earned_cents + $1
+       WHERE id = $2
+       RETURNING balance_cents, total_earned_cents, total_cashed_out_cents`,
+      [reward_cents, userId]
+    )
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'User not found' })
+      return
+    }
+
+    console.log('rewards/add - result:', result.rows[0])
+    res.json(result.rows[0])
+  } catch (error) {
+    console.error('Error adding reward:', error)
+    res.status(500).json({ error: 'Failed to add reward' })
+  }
+})
+
+app.post('/api/rewards/cashout', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.userId
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const { amount_dollars } = req.body
+
+    if (!amount_dollars || amount_dollars < 1 || amount_dollars % 1 !== 0) {
+      res.status(400).json({ error: 'Amount must be a whole number >= 1 dollar' })
+      return
+    }
+
+    const amount_cents = amount_dollars * 100
+
+    const balanceResult = await pool.query<{ balance_cents: number }>(
+      'SELECT balance_cents FROM users WHERE id = $1',
+      [userId]
+    )
+
+    if (balanceResult.rows.length === 0 || balanceResult.rows[0].balance_cents < amount_cents) {
+      res.status(400).json({ error: 'Insufficient balance' })
+      return
+    }
+
+    await pool.query('BEGIN')
+
+    try {
+      const updateResult = await pool.query<{
+        balance_cents: number
+        total_cashed_out_cents: number
+      }>(
+        `UPDATE users 
+         SET balance_cents = balance_cents - $1,
+             total_cashed_out_cents = total_cashed_out_cents + $1
+         WHERE id = $2
+         RETURNING balance_cents, total_cashed_out_cents`,
+        [amount_cents, userId]
+      )
+
+      const cashoutResult = await pool.query<{
+        id: number
+        amount_cents: number
+        created_at: string
+      }>(
+        `INSERT INTO cashout_history (user_id, amount_cents, status)
+         VALUES ($1, $2, 'completed')
+         RETURNING id, amount_cents, created_at`,
+        [userId, amount_cents]
+      )
+
+      await pool.query('COMMIT')
+
+      res.json({
+        success: true,
+        cashout_id: cashoutResult.rows[0].id,
+        amount_dollars,
+        new_balance: updateResult.rows[0].balance_cents / 100,
+        timestamp: cashoutResult.rows[0].created_at
+      })
+    } catch (err) {
+      await pool.query('ROLLBACK')
+      throw err
+    }
+  } catch (error) {
+    console.error('Error processing cashout:', error)
+    res.status(500).json({ error: 'Failed to process cashout' })
+  }
+})
+
+app.get('/api/rewards/cashout-history', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.userId
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const result = await pool.query<{
+      id: number
+      amount_cents: number
+      status: string
+      created_at: string
+    }>(
+      `SELECT id, amount_cents, status, created_at 
+       FROM cashout_history 
+       WHERE user_id = $1 
+       ORDER BY created_at DESC 
+       LIMIT 50`,
+      [userId]
+    )
+
+    res.json(result.rows)
+  } catch (error) {
+    console.error('Error fetching cashout history:', error)
+    res.status(500).json({ error: 'Failed to fetch cashout history' })
+  }
+})
+
+// Admin rewards endpoints
+app.get('/api/admin/users-rewards', requireAdmin, async (_req: AuthedRequest, res) => {
+  try {
+    const result = await pool.query<{
+      id: number
+      username: string
+      balance_cents: number
+      total_earned_cents: number
+      total_cashed_out_cents: number
+    }>(
+      `SELECT id, username, balance_cents, total_earned_cents, total_cashed_out_cents
+       FROM users
+       ORDER BY username`
+    )
+    res.json(result.rows)
+  } catch (error) {
+    console.error('Error fetching user rewards:', error)
+    res.status(500).json({ error: 'Failed to fetch user rewards' })
+  }
+})
+
+app.put('/api/admin/user-rewards/:userId', requireAdmin, async (req: AuthedRequest, res) => {
+  try {
+    const { userId } = req.params
+    const { balance_cents } = req.body
+
+    const result = await pool.query<{
+      id: number
+      username: string
+      balance_cents: number
+      total_earned_cents: number
+      total_cashed_out_cents: number
+    }>(
+      `UPDATE users 
+       SET balance_cents = $1
+       WHERE id = $2
+       RETURNING id, username, balance_cents, total_earned_cents, total_cashed_out_cents`,
+      [balance_cents, userId]
+    )
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'User not found' })
+      return
+    }
+
+    res.json(result.rows[0])
+  } catch (error) {
+    console.error('Error updating user rewards:', error)
+    res.status(500).json({ error: 'Failed to update user rewards' })
+  }
+})
+
+// User management endpoints
+app.get('/api/admin/users', requireAdmin, async (_req: AuthedRequest, res) => {
+  try {
+    const result = await pool.query<{
+      id: number
+      username: string
+      role: string
+      is_enabled: boolean
+      created_at: string
+    }>(
+      `SELECT id, username, role, COALESCE(is_enabled, true) AS is_enabled, created_at
+       FROM users
+       ORDER BY created_at DESC`
+    )
+    res.json(result.rows)
+  } catch (error) {
+    console.error('Error fetching users:', error)
+    res.status(500).json({ error: 'Failed to fetch users' })
+  }
+})
+
+app.delete('/api/admin/users/:userId', requireAdmin, async (req: AuthedRequest, res) => {
+  try {
+    const { userId } = req.params
+    const id = Number(userId)
+
+    // Prevent deleting yourself
+    if (id === req.user?.userId) {
+      res.status(400).json({ error: 'Cannot delete your own account' })
+      return
+    }
+
+    // Prevent deleting other admins
+    const user = await pool.query<{ role: string }>(
+      `SELECT role FROM users WHERE id = $1`,
+      [id]
+    )
+    if (user.rows.length > 0 && user.rows[0].role === 'admin') {
+      res.status(403).json({ error: 'Cannot delete admin accounts' })
+      return
+    }
+
+    const result = await pool.query(
+      `DELETE FROM users WHERE id = $1 RETURNING id`,
+      [id]
+    )
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'User not found' })
+      return
+    }
+
+    res.json({ ok: true })
+  } catch (error) {
+    console.error('Error deleting user:', error)
+    res.status(500).json({ error: 'Failed to delete user' })
+  }
+})
+
+app.put('/api/admin/users/:userId/status', requireAdmin, async (req: AuthedRequest, res) => {
+  try {
+    const { userId } = req.params
+    const { is_enabled } = req.body
+    const id = Number(userId)
+
+    // Prevent disabling yourself
+    if (id === req.user?.userId) {
+      res.status(400).json({ error: 'Cannot disable your own account' })
+      return
+    }
+
+    const result = await pool.query<{
+      id: number
+      username: string
+      role: string
+      is_enabled: boolean
+      created_at: string
+    }>(
+      `UPDATE users 
+       SET is_enabled = $1
+       WHERE id = $2
+       RETURNING id, username, role, COALESCE(is_enabled, true) AS is_enabled, created_at`,
+      [is_enabled, id]
+    )
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'User not found' })
+      return
+    }
+
+    res.json(result.rows[0])
+  } catch (error) {
+    console.error('Error updating user status:', error)
+    res.status(500).json({ error: 'Failed to update user status' })
+  }
+})
+
 async function start() {
   await initDb()
   app.listen(PORT, () => {

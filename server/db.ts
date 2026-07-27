@@ -129,8 +129,7 @@ async function migrateJsonProgressToRows(): Promise<void> {
     }
   }
 
-  await pool.query(`ALTER TABLE spelling_progress DROP COLUMN IF EXISTS words`)
-  console.log(`Migrated JSON progress for ${rows.rows.length} user(s) into user_word_progress`)
+    await pool.query(`ALTER TABLE spelling_progress DROP COLUMN IF EXISTS words`)
 }
 
 export async function loadUserProgress(userId: number): Promise<{
@@ -287,12 +286,17 @@ export async function saveUserProgress(
 }
 
 export async function initDb(): Promise<void> {
+  console.log('Initializing database...')
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+      balance_cents INTEGER NOT NULL DEFAULT 0,
+      total_earned_cents INTEGER NOT NULL DEFAULT 0,
+      total_cashed_out_cents INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
@@ -349,6 +353,30 @@ export async function initDb(): Promise<void> {
       ADD COLUMN IF NOT EXISTS definition TEXT
   `)
 
+  // Add reward columns to users table
+  console.log('initDb: Adding reward columns to users table...')
+  await pool.query(`
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS balance_cents INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS total_earned_cents INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS total_cashed_out_cents INTEGER DEFAULT 0
+  `)
+  console.log('initDb: Reward columns added successfully')
+
+  // Create cashout_history table
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cashout_history (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount_cents INTEGER NOT NULL,
+      status VARCHAR(50) DEFAULT 'completed',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_cashout_history_user
+      ON cashout_history (user_id);
+  `)
+
   await pool.query(`
     ALTER TABLE users
       ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'
@@ -366,8 +394,28 @@ export async function initDb(): Promise<void> {
     END $$;
   `)
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL OR role NOT IN ('admin', 'user')`)
-  await pool.query(`UPDATE users SET role = 'admin' WHERE username = 'katic'`)
-  await pool.query(`UPDATE users SET role = 'user' WHERE username <> 'katic'`)
+  
+  // Add is_enabled column for user management
+  console.log('initDb: Adding user status column...')
+  await pool.query(`
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT true
+  `)
+  console.log('initDb: User status column added successfully')
+  
+  // Create admin user if it doesn't exist
+  console.log('initDb: Setting up admin user...')
+  const bcrypt = (await import('bcryptjs')).default
+  const adminPassword = process.env.ADMIN_PASSWORD || 'admin'
+  const adminHashedPassword = await bcrypt.hash(adminPassword, 10)
+  
+  await pool.query(
+    `INSERT INTO users (username, password_hash, role, balance_cents, total_earned_cents, total_cashed_out_cents)
+     VALUES ($1, $2, $3, 0, 0, 0)
+     ON CONFLICT (username) DO UPDATE SET role = 'admin'`,
+    ['katic', adminHashedPassword, 'admin']
+  )
+  console.log('initDb: Admin user ready (username: katic, password: from ADMIN_PASSWORD env or "admin")')
 
   const count = await pool.query<{ n: string }>('SELECT COUNT(*)::text AS n FROM vocabulary_words')
   if (Number(count.rows[0].n) === 0) {
@@ -376,4 +424,5 @@ export async function initDb(): Promise<void> {
   }
 
   await migrateJsonProgressToRows()
+  console.log('initDb: Database initialization complete!')
 }

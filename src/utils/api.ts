@@ -173,3 +173,112 @@ export async function saveProgressToServer(data: ProgressData): Promise<void> {
   })
   if (!res.ok) throw new Error(await parseError(res))
 }
+
+// Reward system APIs
+export interface RewardBalance {
+  balance_cents: number
+  total_earned_cents: number
+  total_cashed_out_cents: number
+}
+
+export async function getRewardBalance(): Promise<RewardBalance> {
+  const res = await fetch('/api/rewards/balance', { headers: authHeaders() })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
+
+export async function addReward(amount_cents: number = 5): Promise<RewardBalance> {
+  const res = await fetch('/api/rewards/add', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ reward_cents: amount_cents })
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
+
+export async function requestCashout(amount_dollars: number): Promise<{ success: boolean; message: string }> {
+  const res = await fetch('/api/rewards/cashout', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ amount_dollars })
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
+
+export interface CashoutRecord {
+  id: number
+  amount_cents: number
+  status: string
+  created_at: string
+}
+
+export async function getCashoutHistory(): Promise<CashoutRecord[]> {
+  const res = await fetch('/api/rewards/cashout-history', { headers: authHeaders() })
+  if (!res.ok) throw new Error(await parseError(res))
+  const data = await res.json()
+  return (data.history ?? []) as CashoutRecord[]
+}
+
+export interface UserReward {
+  id: number
+  username: string
+  balance_cents: number
+  total_earned_cents: number
+  total_cashed_out_cents: number
+}
+
+export async function getAdminUsersRewards(): Promise<UserReward[]> {
+  const res = await fetch('/api/admin/users-rewards', { headers: authHeaders() })
+  if (!res.ok) throw new Error(await parseError(res))
+  const data = await res.json()
+  return Array.isArray(data) ? data : (data.users ?? []) as UserReward[]
+}
+
+export async function updateUserRewards(
+  userId: number,
+  patch: { balance_cents?: number; total_earned_cents?: number; total_cashed_out_cents?: number }
+): Promise<UserReward> {
+  const res = await fetch(`/api/admin/user-rewards/${userId}`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify(patch)
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
+
+export interface UserManagement {
+  id: number
+  username: string
+  role: string
+  is_enabled: boolean
+  created_at: string
+}
+
+export async function getAdminUsers(): Promise<UserManagement[]> {
+  const res = await fetch('/api/admin/users', { headers: authHeaders() })
+  if (!res.ok) throw new Error(await parseError(res))
+  const data = await res.json()
+  return Array.isArray(data) ? data : (data.users ?? []) as UserManagement[]
+}
+
+export async function deleteAdminUser(userId: number): Promise<{ ok: boolean }> {
+  const res = await fetch(`/api/admin/users/${userId}`, {
+    method: 'DELETE',
+    headers: authHeaders()
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
+
+export async function toggleUserStatus(userId: number, enabled: boolean): Promise<UserManagement> {
+  const res = await fetch(`/api/admin/users/${userId}/status`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify({ is_enabled: enabled })
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}

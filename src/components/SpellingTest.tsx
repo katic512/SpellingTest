@@ -6,8 +6,10 @@ import Feedback from './Feedback'
 import DefinitionDisplay from './DefinitionDisplay'
 import Statistics from './Statistics'
 import Dashboard from './Dashboard'
+import RewardDisplay, { rewardEmitter } from './RewardDisplay'
+import CashoutModal from './CashoutModal'
 import { useAuth } from '../auth/AuthContext'
-import { fetchProgress, saveProgressToServer, fetchWordDefinition } from '../utils/api'
+import { fetchProgress, saveProgressToServer, fetchWordDefinition, addReward, getRewardBalance } from '../utils/api'
 import {
   WordPerformance,
   ProgressData,
@@ -65,6 +67,8 @@ export default function SpellingTest({ words, onOpenAdmin }: SpellingTestProps) 
   const [sessionAttempts, setSessionAttempts] = useState(0)
   const [sessionSuccesses, setSessionSuccesses] = useState(0)
   const [sessionMisses, setSessionMisses] = useState(0)
+  const [showCashout, setShowCashout] = useState(false)
+  const [balance, setBalance] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const skipNextSave = useRef(true)
 
@@ -172,6 +176,22 @@ export default function SpellingTest({ words, onOpenAdmin }: SpellingTestProps) 
     fetchDefinition()
   }, [currentWord])
 
+  // Fetch balance when cashout modal opens
+  useEffect(() => {
+    if (!showCashout) return
+
+    const fetchBalance = async () => {
+      try {
+        const data = await getRewardBalance()
+        setBalance(data.balance_cents)
+      } catch (err) {
+        console.error('Failed to fetch balance:', err)
+      }
+    }
+
+    fetchBalance()
+  }, [showCashout])
+
   const handleCheck = () => {
     const key = normalizeWordKey(currentWord)
     if (!key) return
@@ -182,6 +202,12 @@ export default function SpellingTest({ words, onOpenAdmin }: SpellingTestProps) 
     setSessionAttempts(n => n + 1)
     if (isCorrect) {
       setSessionSuccesses(n => n + 1)
+      // Award $0.05 for correct answer (5 cents)
+      addReward(5).catch(err => {
+        console.error('Failed to award reward:', err)
+      })
+      // Trigger immediate RewardDisplay refresh
+      rewardEmitter.emit()
     } else {
       setSessionMisses(n => n + 1)
     }
@@ -267,6 +293,15 @@ export default function SpellingTest({ words, onOpenAdmin }: SpellingTestProps) 
       <div className="header-with-controls">
         <h1 className="title">🎓 Spelling Test</h1>
         <div className="header-actions">
+          <RewardDisplay />
+          <button
+            type="button"
+            className="btn-toggle-dashboard"
+            onClick={() => setShowCashout(true)}
+            title="Cash out your rewards"
+          >
+            💵 Cash Out
+          </button>
           <span className="user-chip" title={user?.username}>
             {user?.username}
           </span>
@@ -367,6 +402,15 @@ export default function SpellingTest({ words, onOpenAdmin }: SpellingTestProps) 
           </div>
         </>
       )}
+      <CashoutModal
+        isOpen={showCashout}
+        balance_cents={balance}
+        onClose={() => setShowCashout(false)}
+        onSuccess={() => {
+          // Refresh balance after successful cashout
+          getRewardBalance().then(data => setBalance(data.balance_cents)).catch(err => console.error(err))
+        }}
+      />
     </div>
   )
 }

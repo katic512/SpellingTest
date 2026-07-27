@@ -190,3 +190,92 @@
     width: 100%;
   }
 }
+
+/* Active tab button styling */
+.admin-btn-active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  color: white !important;
+  font-weight: 600;
+}
+
+.admin-btn-active:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
+}
+
+/* Money formatting for rewards tab */
+.admin-money {
+  font-weight: 600;
+  color: #2d3748;
+  font-family: 'Courier New', monospace;
+  text-align: right;
+  padding-right: 1rem;
+}
+
+/* Action buttons styling */
+.admin-action-btn {
+  padding: 0.5rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f7fafc;
+  color: #2d3748;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin: 0 0.25rem;
+}
+
+.admin-action-btn:hover:not(:disabled) {
+  background: #edf2f7;
+  border-color: #cbd5e0;
+}
+
+.admin-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* User management tab styles */
+.admin-username {
+  font-weight: 600;
+  color: #2d3748;
+  white-space: nowrap;
+}
+
+.admin-role {
+  padding: 0.25rem 0.75rem;
+  background: #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #2d3748;
+  display: inline-block;
+}
+
+.admin-status {
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.admin-status-enabled {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.admin-status-disabled {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.admin-date {
+  color: #666;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
